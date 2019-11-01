@@ -1,0 +1,352 @@
+#include "stdafx.h"
+#include <iostream>
+#include <math.h>
+#include <iomanip>
+#include <fstream> 
+#include <stdio.h>
+using namespace std;
+double derA1(double x0, double delx, double x) {
+	return(1 / (1 + (exp((x - x0) / delx))));
+}
+
+
+double derA2(double x0, double delx, double x) {
+	return (1 - (1 / (1 + (exp((x - x0) / delx)))));
+}
+
+double derx0(double A1, double A2, double x0, double delx, double x) {
+	return (-1 * (A1 - A2)*(exp((x - x0) / delx)*-1 * 1 / delx)) / pow((1 + exp((x - x0) / delx)), 2);
+}
+
+double derdelx(double A1, double A2, double x0, double delx, double x) {
+	return (-1 * (A1 - A2)*(exp((x - x0) / delx)*-1 * (x - x0) / pow(delx, 2))) / pow((1 + exp((x - x0) / delx)), 2);
+}
+
+void printMat(double **mass, int size) {
+	for (int i = 0; i < size; i++) {
+		for (int j = 0; j < size; j++) {
+			cout << setiosflags(ios::left) << fixed << setprecision(3) << setw(7) << mass[i][j] << " ";
+		}
+		cout << endl;
+	}
+	cout << endl;
+}
+
+void printMatJac(double **mass, int size, int unkPar) {
+	for (int i = 0; i < size; i++) {
+		for (int j = 0; j < unkPar; j++) {
+			cout << setiosflags(ios::left) << fixed << setprecision(3) << setw(7) << mass[i][j] << " ";
+		}
+		cout << endl;
+	}
+	cout << endl;
+}
+
+
+//функция ввода
+void inpt(double*w, double* mX, double* mY, int counter) {
+	double maxy, miny, maxx, Avesumm = 0;
+	int i = 0;
+	ifstream infile("C:\\Users\\user\\Desktop\\peaks7.txt");
+	while (infile >> mX[i] >> mY[i]) {//чтение точек из файла
+		Avesumm += mY[i];
+		if (i == 0) {
+			maxy = mY[0]; miny = mY[0]; maxx = mX[0];
+			i += 1;
+			continue;
+		}
+		if (maxy < mY[i]) maxy = mY[i];
+		if (miny > mY[i]) miny = mY[i];
+		if (maxx < mX[i]) maxx = mX[i];
+		i += 1;
+		//	}
+	}
+	Avesumm /= counter;
+	double minDev;
+	for (int i = 0; i < counter; i++) {
+		if (i == 0) {
+			minDev = abs(mY[i] - Avesumm);
+			w[2] = mX[i];
+			continue;
+		}
+		if (abs(mY[i] - Avesumm) < minDev) {
+			minDev = abs(mY[i] - Avesumm);
+			w[2] = mX[i];
+		}
+	}
+	w[0] = miny; w[1] = maxy; w[3] = maxx;//заполняем вектор w
+}
+
+
+double func(double A1, double A2, double x0, double delx, double x) {//наша функция
+	return  A2 + ((A1 - A2) / (1 + exp((x - x0) / delx)));
+}
+
+//матрица Гессе
+void MatGesse(double**massJac, double**massGesse, int unkPar, int counter, double  coeffGesse) {
+	double **multipMass = new double*[unkPar];
+	for (int i = 0; i < unkPar; i++) {
+		multipMass[i] = new double[unkPar];
+	}
+	double **TransMassJac = new double*[unkPar];
+	for (int i = 0; i < unkPar; i++) {
+		TransMassJac[i] = new double[counter];
+	}
+	for (int i = 0; i < unkPar; i++) {
+		for (int j = 0; j <counter; j++)
+			TransMassJac[i][j] = massJac[j][i];//транспонируем Якоби
+	}
+	//	printMat(TransMassJac, unkPar,counter);
+	for (int i = 0; i < unkPar; i++) {
+		for (int j = 0; j < unkPar; j++) { // j < counter
+			multipMass[i][j] = 0;
+			for (int k = 0; k < counter; k++)
+				multipMass[i][j] += TransMassJac[i][k] * massJac[k][j];//промежуточное умножение
+		}
+	}
+	//printMat(multipMass,unkPar);
+	double **UnitMat = new double*[unkPar];
+	for (int i = 0; i < unkPar; i++) {
+		UnitMat[i] = new double[unkPar];
+		for (int j = 0; j < unkPar; j++) {
+			if (i == j) UnitMat[i][j] = coeffGesse;
+			else UnitMat[i][j] = 0;
+		}
+	}
+	for (int i = 0; i < unkPar; i++) {
+		for (int j = 0; j < unkPar; j++)
+			massGesse[i][j] = multipMass[i][j] + UnitMat[i][j];//итог
+
+	}
+}
+//Вспомогательная функция для поиска опеределителя
+void GetMatr(double **mas, double **p, int str, int stlb, int size) {
+	int  coeffi, coeffj;
+	coeffi = 0;
+	for (int i = 0; i<size - 1; i++) {// проверка индекса строки
+		if (i == str) coeffi = 1;
+		coeffj = 0;
+		for (int j = 0; j<size - 1; j++) {// проверка индекса столбца
+			if (j == stlb) coeffj = 1;
+			p[i][j] = mas[i + coeffi][j + coeffj];
+		}
+	}
+}
+//Функция для поиска определителя
+double Determinant(double**mass, int size) {
+	int  power = 1, reduced;
+	double save = 0;
+	double **newM = new double *[size - 1];
+	//newM = new int*[size];
+	for (int i = 0; i < size - 1; i++)
+		newM[i] = new double[size - 1];
+
+	reduced = size - 1;
+	if (size<1) cout << "Опрежелителя нет!";
+	if (size == 1) {
+		save = mass[0][0];
+		return(save);
+	}
+	if (size == 2) {
+		save = (mass[0][0] * mass[1][1]) - (mass[1][0] * mass[0][1]);
+		return(save);
+	}
+	if (size>2) {
+		for (int str = 0; str<size; str++) {
+			GetMatr(mass, newM, str, 0, size);
+			save = save + power * mass[str][0] * Determinant(newM, reduced);
+			power *= -1;
+		}
+	}
+	return(save);
+}
+
+//удаление i строки и j столбца из матрицы
+double GetMatKram(double**mass, double*massY, int stlb, int power) {
+	double **newMat = new double*[power];
+	for (int i = 0; i < power; i++)
+		newMat[i] = new double[power];
+	for (int i = 0; i < power; i++) {
+		if (i == stlb) {
+			for (int j = 0; j < power; j++)
+				newMat[j][i] = massY[j];
+			continue;
+		}
+		for (int j = 0; j < power; j++)
+			newMat[j][i] = mass[j][i];
+	}
+	return(Determinant(newMat, power));
+}
+
+void Kramer(double**mass, double* massY, int power, double* p) {
+	double mid = Determinant(mass, power);
+	//	cout << fixed << mid << endl;
+	if (mid == 0) {
+		for (int i = 0; i < power; i++) {
+			if ((GetMatKram(mass, massY, i, power)) == 0) {
+				if (i == power) cout << "Бесконечное кол-во решений";
+				break;
+			}
+			else {
+				cout << "Решений нет";
+				break;
+			}
+		}
+	}
+	else {
+		for (int i = 0; i < power; i++) {
+			p[i] = (GetMatKram(mass, massY, i, power) / mid);
+			//cout << p[i] << "|";
+		}
+
+
+	}
+}
+
+
+//вектор Р
+void vectorP(double**massGesse, double**massJac, double *massDevia, double *p, int counter, int unkPar) {
+	double *b = new double[unkPar];
+	double **TransMassJac = new double*[unkPar];
+	for (int i = 0; i < unkPar; i++) {
+		TransMassJac[i] = new double[counter];
+		for (int j = 0; j <counter; j++)
+			TransMassJac[i][j] = massJac[j][i];
+	}
+	for (int i = 0; i < unkPar; i++) {
+		b[i] = 0;
+		for (int j = 0; j <counter; j++) {
+			b[i] += -1 * TransMassJac[i][j] * massDevia[j];//вектор для поиска P
+		}
+	}
+
+	Kramer(massGesse, b, unkPar, p);
+
+
+}
+//матрица Якоби
+void MatJacobi(double**massJac, double*mX, double*w, int counter, int unkPar) {
+	//double Eps = 0.0001;
+	for (int i = 0; i < counter; i++) {
+		massJac[i][0] = derA1(w[2], w[3], mX[i]);
+		massJac[i][1] = derA2(w[2], w[3], mX[i]);
+		massJac[i][2] = derx0(w[0], w[1], w[2], w[3], mX[i]);
+		massJac[i][3] = derdelx(w[0], w[1], w[2], w[3], mX[i]);
+	}
+}
+
+//массив отклонений
+double Deviation(double*w, double*massDevia, double* mX, double* mY, int counter) {
+	double summDevia = 0;
+	for (int i = 0; i < counter; i++) {
+		massDevia[i] = func(w[0], w[1], w[2], w[3], mX[i]) - mY[i];
+		//cout << massDevia[i];
+		summDevia += pow(massDevia[i], 2);
+	}
+	return summDevia;
+}
+
+//главная функция
+void LevenbMarq(double* w, double* mX, double* mY, int MaxStep, double Eps, int unkPar, int counter) {
+	double **massJac = new double*[counter];
+	for (int i = 0; i < counter; i++)
+		massJac[i] = new double[unkPar];
+	double **massGesse = new double*[unkPar];
+	for (int i = 0; i < unkPar; i++)
+		massGesse[i] = new double[unkPar];
+	double *massDevia = new double[counter];   //память под наши массивы
+	double *tempW = new double[unkPar];
+	double summDevia = 0;
+	double *p = new double[unkPar];
+	double coeffGesse = 0.01;
+	bool leave = false;
+	int m_max = 5;
+	for (int k = 0; k < MaxStep; k++) {
+		summDevia = Deviation(w, massDevia, mX, mY, counter);//получаем массив отклонений
+		MatJacobi(massJac, mX, w, counter, unkPar);//матрица Якоби
+		double save = summDevia;
+		for (int m = 0; m <m_max; m++) {
+			MatGesse(massJac, massGesse, unkPar, counter, coeffGesse);//получаем матрицу Гессе
+			vectorP(massGesse, massJac, massDevia, p, counter, unkPar);//ищем вектор P
+			for (int i = 0; i < unkPar; i++) {
+				tempW[i] = w[i] + p[i];//псевдоискомый вектор
+			}
+			summDevia = Deviation(tempW, massDevia, mX, mY, counter);//проверка его отклонения
+			if (summDevia > save) {
+				if (m <m_max) {
+					coeffGesse *= 10;
+					continue;
+				}
+				else {
+					for (int i = 0; i < unkPar; i++)
+						w[i] = tempW[i];
+
+					if (summDevia <= Eps) {
+						leave = true;
+						break;
+					}
+					//	условия выхода
+					cout << "Вектор w= ";
+					for (int i = 0; i < unkPar; i++)
+						cout << w[i] << "|";
+					cout << endl;
+					//	*/
+					break;
+				};
+			}
+			else {
+				for (int i = 0; i < unkPar; i++)
+					w[i] = tempW[i];
+
+				if (summDevia <= Eps) {
+					leave = true;
+					break;
+				}
+				coeffGesse /= 10;
+				//	условия выхода
+				cout << "Вектор w= ";
+				for (int i = 0; i < unkPar; i++)
+					cout << w[i] << "|";
+				cout << endl;
+				//	*/
+				break;
+			}
+		}
+		if (leave == true) {
+			cout << "   A1" << "     |" << "   A2" << "    |" << "   x0" << "     |" << "   delX" << "  |" << endl;
+			for (int i = 0; i < unkPar; i++)
+				cout << w[i] << "|";
+			break;
+		}
+	}
+	if (leave == false) cout << "Нет решений";
+}
+
+int main()
+{
+	setlocale(LC_ALL, "Russian");
+	int counter = 0, MaxStep, unkPar = 4;
+	double Eps;
+	cout << fixed << setprecision(6) << "Введите количество шагов и Эпсилон:" << endl;
+	cin >> MaxStep >> Eps;
+	double *w = new double[unkPar];
+	// /*
+	double temp1, temp2;
+	//\C:\\Users\\user\\Desktop\\test1.txt
+	ifstream infile("C:\\Users\\user\\Desktop\\peaks7.txt");
+	while (infile >> temp1 >> temp2) {
+		counter++;
+	}
+	infile.close();
+	double *mX = new double[counter];
+	double *mY = new double[counter];
+	inpt(w, mX, mY, counter);
+	cout << fixed << setprecision(7) << endl;
+	cout << "Вектор w= ";
+	for (int i = 0; i < unkPar; i++)
+		cout << w[i] << "|";
+	cout << endl;
+	LevenbMarq(w, mX, mY, MaxStep, Eps, unkPar, counter);
+	return 0;
+}
+
